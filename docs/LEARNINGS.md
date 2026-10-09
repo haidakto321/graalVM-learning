@@ -151,7 +151,47 @@ What the native test run caught here:
 Fixes: `@DisabledInNativeImage` / `@EnabledInNativeImage` (JUnit 5) mark which runtime a test
 is for; replaced the Hamcrest matcher with an exact string.
 
-## 8. Next experiments
+## 8. Faster startup WITHOUT native: CDS, Leyden, CRaC
+
+Same jar, normal JVM, so reflection works with no hints and builds stay fast.
+Each one does a **training run** at build time and saves something, so later starts skip work.
+
+| Method | What is saved from the training run | Where | Needs |
+|---|---|---|---|
+| **CDS** (AppCDS) | classes already parsed + verified (`app.jsa`) | in the JDK since long ago | unpacked jar (`-Djarmode=tools extract`) |
+| **Leyden AOT cache** | classes parsed **and linked**, plus method profiles (`app.aot`, 50 MB) | JDK 24+ (one-step flag in JDK 25) | JDK 25 runtime |
+| **CRaC** | a **snapshot of the whole running process**: heap, threads, JIT-compiled code | JDK built with CRaC (Azul Zulu, BellSoft Liberica) | `org.crac` dep + checkpoint step (`build-crac.ps1`) |
+| GraalVM native | the whole app compiled to machine code | GraalVM | hints, slow build |
+
+Measured 2026-10-09, same machine, `compare.ps1 -Runs 3` (Spring time / first HTTP 200 incl. `docker run`):
+
+| Image | Spring start | First HTTP 200 | Memory idle | Image size | Reflection, no hint |
+|---|---|---|---|---|---|
+| jvm (Temurin 21) | 2.01 - 2.04 s | 2.9 - 3.2 s | ~174 MiB | 131 MB | works |
+| cds (Temurin 21) | 1.34 - 1.49 s | ~2.1 s | ~141 MiB | 157 MB | works |
+| leyden (Temurin 25) | 0.69 - 1.08 s | 1.3 - 1.6 s | ~180 MiB | 162 MB | works |
+| **crac** (Zulu 21 CRaC) | **0.11 - 0.12 s** ("Restored in") | 0.53 - 0.61 s | ~110 MiB | 293 MB | works |
+| **native** (GraalVM 21) | **0.05 - 0.14 s** | 0.38 - 0.55 s | **~27 MiB** | **54 MB** | **fails** |
+
+What the numbers say:
+- **CDS** = ~30% faster start for free (no code change, still Java 21). The easiest win.
+- **Leyden** = ~2x faster than plain JVM, still no code change - but needs JDK 25.
+- **CRaC** = almost native start speed, with normal JVM behaviour and a **warm JIT** (code is
+  already compiled when restored - native never gets JIT). But memory stays JVM-sized and the
+  image is the biggest (it carries the snapshot).
+- **Native** still wins on memory and size by far.
+
+CRaC catches (why it is not free):
+- The snapshot holds **everything in memory** - including passwords, tokens, keys read at
+  startup. Treat the image like a secret. Do not checkpoint after loading production secrets.
+- Open files / sockets / DB connections cannot be saved. Spring closes and reopens its own
+  (`Spring-managed lifecycle restart` in the log); your own resources need `org.crac.Resource`
+  callbacks. Same "frozen at build time" problem as section 3: time, random seeds, hostnames.
+- Restore must run on a compatible CPU (the JIT code uses CPU features of the checkpoint machine).
+- Engine: Azul's default here is **warp** (user space) - worked **without** `--privileged`.
+  The older **CRIU** engine needs extra container permissions.
+
+## 9. Next experiments
 
 1. Remove `@ImportRuntimeHints` -> rebuild native -> `RegisteredGreeter` also fails.
 2. Use the tracing agent to find hints automatically:

@@ -26,6 +26,15 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+        <!--
+          CRaC API (version managed by Spring Boot). Lets Spring take the checkpoint itself
+          (-Dspring.context.checkpoint=onRefresh). On a normal JDK it does nothing.
+        -->
+        <dependency>
+            <groupId>org.crac</groupId>
+            <artifactId>crac</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

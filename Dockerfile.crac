@@ -1,0 +1,19 @@
+# CRaC (Coordinated Restore at Checkpoint) - step 1 of 2: the CHECKPOINT image.
+# Needs a JDK built with CRaC (Azul Zulu here) - a normal Temurin JDK cannot do it.
+# Do not build this alone - run build-crac.ps1, which also takes the snapshot.
+# Engine: Azul's default "warp" (user space, no extra container permissions), not CRIU.
+FROM eclipse-temurin:21-jdk AS build
+WORKDIR /src
+COPY .mvn .mvn
+COPY mvnw pom.xml ./
+RUN sed -i 's/\r$//' mvnw && chmod +x mvnw && ./mvnw -B -q dependency:go-offline
+COPY src src
+RUN ./mvnw -B -DskipTests package
+
+FROM azul/zulu-openjdk:21-jdk-crac-latest
+WORKDIR /work
+COPY --from=build /src/target/app.jar app.jar
+EXPOSE 8080
+# Start the app; once the Spring context is ready, Spring asks the JVM to snapshot the WHOLE
+# process (heap, threads, loaded + JIT-compiled code) into /crac, then the process exits.
+ENTRYPOINT ["java", "-XX:CRaCCheckpointTo=/crac", "-Dspring.context.checkpoint=onRefresh", "-jar", "app.jar"]

@@ -1,0 +1,19 @@
+# Project Leyden AOT cache (JDK 24+ JEP 483, one-step flag in JDK 25 JEP 514).
+# Like CDS, but classes are also already LINKED, and JDK 25 adds method profiles from the
+# training run. Bytecode is still Java 21 - only the runtime is JDK 25.
+FROM eclipse-temurin:21-jdk AS build
+WORKDIR /src
+COPY .mvn .mvn
+COPY mvnw pom.xml ./
+RUN sed -i 's/\r$//' mvnw && chmod +x mvnw && ./mvnw -B -q dependency:go-offline
+COPY src src
+RUN ./mvnw -B -DskipTests package
+
+FROM eclipse-temurin:25-jre
+WORKDIR /work
+COPY --from=build /src/target/app.jar app.jar
+RUN java -Djarmode=tools -jar app.jar extract --destination application && rm app.jar
+# Training run: record what the app does at startup, then write the cache app.aot.
+RUN java -XX:AOTCacheOutput=application/app.aot -Dspring.context.exit=onRefresh -jar application/app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-XX:AOTCache=application/app.aot", "-jar", "application/app.jar"]

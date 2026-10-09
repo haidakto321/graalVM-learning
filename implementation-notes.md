@@ -44,6 +44,24 @@ Decisions not in the request, changes, tradeoffs. Newest at bottom.
 - First `docker run` for native tests failed with exit 20: the GraalVM image's ENTRYPOINT is
   `native-image` itself, so a shell command must use `--entrypoint bash`.
 
+## CDS / Leyden / CRaC round (2026-10-09)
+
+- **Same project, not a new one**: the point is comparing startup methods on the same app.
+- **Added dependency `org.crac:crac`** (user approved; version 1.5.0 managed by Spring Boot, so no
+  version in the pom). Needed for `-Dspring.context.checkpoint=onRefresh`. No effect on other JDKs.
+  The native image was NOT rebuilt after this pom change - the native app code is unchanged.
+- CDS and Leyden use the training run `-Dspring.context.exit=onRefresh` inside `docker build`;
+  CRaC cannot (needs a running container to snapshot), hence `build-crac.ps1` + `docker commit`.
+- Leyden runs Java 21 bytecode on a **JDK 25** runtime (Spring Boot 3.5.6 started fine on it).
+- CRaC base image: `azul/zulu-openjdk:21-jdk-crac-latest`. Checking `:21-jdk-crac` hit a network
+  reset from Docker Hub's CDN (not proven missing); used the tag that resolved. Pin a digest or
+  fixed version for anything real - `-latest` can change under you.
+- **First version used `--privileged`** (assumed the CRIU engine). The log showed Azul's **warp**
+  engine instead; tested checkpoint AND restore without `--privileged` - both work, so it was
+  removed. Less privilege by default.
+- `graal-study:crac-checkpoint` is an intermediate image left behind by `build-crac.ps1`; safe to
+  delete, it is rebuilt on the next run.
+
 ## Tradeoffs / things to know
 
 - `ghcr.io/graalvm/native-image-community:21` ships **Java 21.0.2** (old patch level); the
