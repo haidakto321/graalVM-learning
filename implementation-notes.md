@@ -62,6 +62,14 @@ Decisions not in the request, changes, tradeoffs. Newest at bottom.
 - `graal-study:crac-checkpoint` is an intermediate image left behind by `build-crac.ps1`; safe to
   delete, it is rebuilt on the next run.
 
+## Local (no Docker) Leyden / auto-CDS check (2026-10-09)
+
+- Ran on Windows with the installed Temurin 25, `dist/app.jar`, in a scratch folder (not in repo).
+- **First measurement was wrong:** unquoted `-Dspring.context.exit=onRefresh` in PowerShell was
+  split at the dot, every run failed in ~0.08 s and looked "fast". Caught because a Spring start
+  cannot take 0.08 s and the cache was 10 MB instead of 50 MB. Re-ran with quoted args and a
+  check that the Spring context actually initialized. Numbers in LEARNINGS.md section 9.
+
 ## Tradeoffs / things to know
 
 - `ghcr.io/graalvm/native-image-community:21` ships **Java 21.0.2** (old patch level); the

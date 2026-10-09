@@ -191,7 +191,53 @@ CRaC catches (why it is not free):
 - Engine: Azul's default here is **warp** (user space) - worked **without** `--privileged`.
   The older **CRIU** engine needs extra container permissions.
 
-## 9. Next experiments
+## 9. Training run, redeploys, and running without Docker
+
+**"Training run"** = not ML. Start the app once while the JVM records what it does (classes
+loaded, linking, hot methods), save that to a file, and later starts read the file instead of
+redoing the work. What the training run exercises is what gets faster - ours stops right after
+startup (`-Dspring.context.exit=onRefresh`), so only startup is sped up.
+
+**Redeploys with Docker:** the training run is a normal `RUN` line, so normal layer cache applies.
+
+| Situation | Trains again? |
+|---|---|
+| Redeploy the same image | No - `app.aot` is inside the image, deploy = pull + run |
+| Rebuild, no code change, same machine | No - every layer `CACHED` (rebuild took 2.8 s) |
+| Code or base JDK changed | Yes - and it must (cache has to match jar + JDK) |
+| Fresh CI runner | Yes, unless you share cache (`buildx --cache-from/--cache-to`) |
+
+Catch: Maven writes timestamps into the jar, so a rebuilt jar with the same code is still a
+"new" file and retrains. Fix: reproducible builds (`project.build.outputTimestamp` in the pom).
+CRaC is not a `RUN` step (`docker commit` in `build-crac.ps1`), so layer cache does not cover it.
+
+**Without Docker** - measured on Windows, JDK 25, plain `java -jar` (time until Spring ready):
+
+| | Start | Extra step |
+|---|---|---|
+| plain jar | 1.64 s | - |
+| Leyden AOT cache | 0.76 - 0.87 s | training run once (8 s, `app.aot` 52 MB) |
+| auto CDS | ~1.0 s | none |
+
+Three ways to manage the cache file yourself:
+
+- **A. Deploy script trains** (Leyden): copy jar -> extract -> training run -> start with
+  `-XX:AOTCache=app.aot`. Same jar + same JDK on redeploy -> skip training (compare checksum).
+- **B. CI trains, ships `app.jar` + `app.aot` together.** CI must use the exact same JDK version
+  as the server.
+- **C. Auto CDS** - no step at all, the JVM manages the file (JDK 19+):
+  `java -XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=app.jsa -jar app.jar`
+  First start writes `app.jsa`; a changed jar or JDK makes the JVM rebuild it by itself.
+  Smaller gain than Leyden here (1.6x vs 2x) but zero work. Best first choice on a plain server.
+
+Not tested yet: what Leyden does when `app.aot` does not match the jar/JDK (expected: warning +
+normal start without the cache).
+
+PowerShell gotcha: quote `-D` options when calling `java` (`'-Dspring.context.exit=onRefresh'`).
+Unquoted, PowerShell splits at the dot and Java fails with
+`Could not find or load main class .context.exit=onRefresh`.
+
+## 10. Next experiments
 
 1. Remove `@ImportRuntimeHints` -> rebuild native -> `RegisteredGreeter` also fails.
 2. Use the tracing agent to find hints automatically:
