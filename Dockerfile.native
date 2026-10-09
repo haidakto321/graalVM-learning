@@ -1,0 +1,18 @@
+# Native: compile the same app ahead-of-time into one Linux binary.
+# Stage 1 has the full GraalVM JDK + native-image tool (big). Stage 2 ships only the binary (small).
+FROM ghcr.io/graalvm/native-image-community:21 AS build
+WORKDIR /src
+COPY .mvn .mvn
+COPY mvnw pom.xml ./
+RUN sed -i 's/\r$//' mvnw && chmod +x mvnw && ./mvnw -B -q dependency:go-offline
+COPY src src
+# -Pnative: Spring AOT turns runtime bean wiring into generated Java + hint files,
+# then native-image does the closed-world analysis and writes target/graalvm-study (an ELF binary).
+# Note: the binary is named after <artifactId>, NOT <finalName> (native plugin's own imageName default).
+RUN ./mvnw -B -Pnative -DskipTests native:compile
+
+# No JDK/JRE here at all. The binary only needs glibc (debian slim has it).
+FROM debian:bookworm-slim
+COPY --from=build /src/target/graalvm-study /app
+EXPOSE 8080
+ENTRYPOINT ["/app"]

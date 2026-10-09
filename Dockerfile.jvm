@@ -1,0 +1,14 @@
+# Baseline: the normal way - a fat jar running on a JVM.
+FROM eclipse-temurin:21-jdk AS build
+WORKDIR /src
+COPY .mvn .mvn
+COPY mvnw pom.xml ./
+# mvnw may have Windows line endings after a checkout on Windows
+RUN sed -i 's/\r$//' mvnw && chmod +x mvnw && ./mvnw -B -q dependency:go-offline
+COPY src src
+RUN ./mvnw -B -DskipTests package
+
+FROM eclipse-temurin:21-jre
+COPY --from=build /src/target/app.jar /app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app.jar"]
